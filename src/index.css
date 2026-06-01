@@ -1,0 +1,173 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 20% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 20% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 20% 10%;
+
+    --primary: 168 80% 42%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 224 20% 20%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 36 90% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 168 80% 42%;
+
+    --radius: 0.625rem;
+
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Inter', sans-serif;
+
+    --gradient-primary: linear-gradient(135deg, hsl(168 80% 42%), hsl(190 70% 40%));
+    --gradient-accent: linear-gradient(135deg, hsl(36 90% 55%), hsl(20 85% 55%));
+    --gradient-surface: linear-gradient(180deg, hsl(220 14% 98%), hsl(220 14% 96%));
+
+    --shadow-xs: 0 1px 2px 0 hsl(0 0% 0% / 0.03);
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.04), 0 1px 2px -1px hsl(0 0% 0% / 0.04);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.05), 0 2px 4px -2px hsl(0 0% 0% / 0.05);
+    --shadow-glow: 0 0 20px -6px hsl(168 80% 42% / 0.2);
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 224 20% 10%;
+    --sidebar-primary: 168 80% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 224 20% 20%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 168 80% 42%;
+
+    --success: 152 69% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 210 92% 54%;
+    --info-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    --background: 224 20% 4%;
+    --foreground: 210 20% 92%;
+
+    --card: 224 18% 7%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 224 18% 7%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 168 80% 50%;
+    --primary-foreground: 224 20% 4%;
+
+    --secondary: 220 16% 14%;
+    --secondary-foreground: 210 20% 85%;
+
+    --muted: 220 14% 12%;
+    --muted-foreground: 215 12% 50%;
+
+    --accent: 36 90% 55%;
+    --accent-foreground: 224 20% 4%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 14% 16%;
+    --input: 220 14% 16%;
+    --ring: 168 80% 50%;
+
+    --radius: 0.625rem;
+
+    --gradient-primary: linear-gradient(135deg, hsl(168 80% 50%), hsl(190 70% 45%));
+    --gradient-accent: linear-gradient(135deg, hsl(36 90% 55%), hsl(20 85% 55%));
+    --gradient-surface: linear-gradient(180deg, hsl(224 18% 9%), hsl(224 20% 5%));
+
+    --shadow-xs: 0 1px 2px 0 hsl(0 0% 0% / 0.1);
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.2), 0 1px 2px -1px hsl(0 0% 0% / 0.15);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.2), 0 2px 4px -2px hsl(0 0% 0% / 0.15);
+    --shadow-glow: 0 0 30px -8px hsl(168 80% 50% / 0.25);
+
+    --sidebar-background: 224 18% 7%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 168 80% 50%;
+    --sidebar-primary-foreground: 224 20% 4%;
+    --sidebar-accent: 220 14% 14%;
+    --sidebar-accent-foreground: 210 20% 85%;
+    --sidebar-border: 220 14% 16%;
+    --sidebar-ring: 168 80% 50%;
+
+    --success: 152 69% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 210 92% 54%;
+    --info-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-body);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    @apply tracking-tight;
+  }
+}
+
+@layer utilities {
+  .text-gradient-primary {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-accent {
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .bg-gradient-surface {
+    background: var(--gradient-surface);
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-card-md {
+    box-shadow: var(--shadow-md);
+  }
+}

@@ -1,0 +1,1 @@
+ALTER TABLE public.recordings ADD COLUMN IF NOT EXISTS biveyos_signals jsonb DEFAULT NULL;

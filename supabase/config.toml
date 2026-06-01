@@ -1,0 +1,58 @@
+project_id = "zmaqqipujjwzviuthjzg"
+
+[functions.analyze-interview]
+verify_jwt = false
+
+[functions.meeting-assistant]
+verify_jwt = false
+
+[functions.analyze-facial-expressions]
+verify_jwt = false
+
+[functions.analyze-member-profile]
+verify_jwt = false
+
+[functions.save-member-insights]
+verify_jwt = false
+
+[functions.analyze-company]
+verify_jwt = false
+
+[functions.analyze-practice-interview]
+verify_jwt = false
+
+[functions.analyze-character-overall]
+verify_jwt = false
+
+[functions.zoom-import]
+verify_jwt = false
+
+[functions.generate-practice-questions]
+verify_jwt = false
+
+[functions.ai-career-coach]
+verify_jwt = false
+
+[functions.career-coach-chat]
+verify_jwt = false
+
+[functions.career-coach-insights]
+verify_jwt = false
+
+[functions.analyze-career-profile]
+verify_jwt = false
+
+[functions.parse-linkedin]
+verify_jwt = false
+
+[functions.generate-daily-training]
+verify_jwt = false
+
+[functions.analyze-micro-test]
+verify_jwt = false
+
+[functions.transcribe-recording]
+verify_jwt = false
+
+[functions.process-recording]
+verify_jwt = false
