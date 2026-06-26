@@ -58,6 +58,7 @@ import {
 } from "@/features/transcription/services/transcriptionService";
 import type { TranscriptPipelineStatus, TranscriptResult } from "@/features/transcription/types";
 import { getErrorToastMessage, invokeEdgeFunction } from "@/lib/edgeFunctionClient";
+import { formatTranscriptionFailure, type TranscriptionInvokePayload } from "@/features/transcription/services/transcriptionErrors";
 import { captureVideoFrameDataUrl, sampleLatestFrames } from "@/lib/frameSampling";
 import { attachStreamAndPlay } from "@/lib/mediaPlayback";
 import { supabase } from "@/integrations/supabase/client";
@@ -766,6 +767,7 @@ const BiveyosPage = ({ initialRecordingInfo, embedded = false, onBack }: Biveyos
   );
   const [form, setForm] = useState<CandidateFormState>(EMPTY_FORM);
   const [candidates, setCandidates] = useState<BiveyosCandidateRecord[]>([]);
+  const [candidateStorageSource, setCandidateStorageSource] = useState<"supabase" | "local" | "unknown">("unknown");
   const [aiContentByCandidate, setAiContentByCandidate] = useState<Record<string, CandidateAiContent>>({});
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [aiPreparing, setAiPreparing] = useState(false);
@@ -812,8 +814,11 @@ const BiveyosPage = ({ initialRecordingInfo, embedded = false, onBack }: Biveyos
     if (embedded) return;
     let active = true;
     listCandidates()
-      .then((records) => {
-        if (active) setCandidates(records);
+      .then((result) => {
+        if (active) {
+          setCandidates(result.candidates);
+          setCandidateStorageSource(result.source);
+        }
       })
       .catch((error: unknown) => {
         console.warn("[biveyos] candidate load failed", error);
@@ -1021,6 +1026,7 @@ const BiveyosPage = ({ initialRecordingInfo, embedded = false, onBack }: Biveyos
     setSelectedCandidateId(record.id);
     setStatusMessage("Aday kaydı oluşturuldu. AI ön değerlendirme ve soru setini hazırlayabilirsiniz.");
     const result = await saveCandidateRecord(record);
+    setCandidateStorageSource(result.source);
     if (result.source === "supabase") {
       toast.success("Aday kaydı oluşturuldu");
     } else {
@@ -1486,19 +1492,15 @@ const BiveyosPage = ({ initialRecordingInfo, embedded = false, onBack }: Biveyos
 
     const { error: uploadError } = await supabase.storage
       .from("recordings")
-      .upload(audioPath, new Blob([capture.blob], { type: normalizedMimeType }), { contentType: normalizedMimeType, upsert: true });
+      .upload(audioPath, new Blob([capture.blob], { type: normalizedMimeType }), { contentType: normalizedMimeType, upsert: false });
 
     if (uploadError) {
       const result = normalizeTranscriptResult("", { error: uploadError.message });
       return { channel: capture.channel, transcript: "", result, error: uploadError.message };
     }
 
-    const result = await invokeEdgeFunction<{
-      transcript?: string;
+    const result = await invokeEdgeFunction<TranscriptionInvokePayload & {
       transcriptResult?: TranscriptResult;
-      provider?: string;
-      providerError?: string;
-      warnings?: string[];
     }>(EDGE_FUNCTIONS.TRANSCRIBE_RECORDING, {
       filePath: audioPath,
       recordingType: "mülakat",
@@ -1509,12 +1511,12 @@ const BiveyosPage = ({ initialRecordingInfo, embedded = false, onBack }: Biveyos
 
     const normalized = normalizeTranscriptResult(result.data, {
       provider: result.data?.provider,
-      error: result.error ? getErrorToastMessage(result.error) : undefined,
+      error: result.error ? formatTranscriptionFailure(result.error, result.data) : undefined,
       warnings: result.data?.warnings,
     });
 
     if (result.error || !normalized.text) {
-      const errorMessage = result.error ? getErrorToastMessage(result.error) : "Transkript alınamadı.";
+      const errorMessage = result.error ? formatTranscriptionFailure(result.error, result.data) : "Transkript alınamadı.";
       return {
         channel: capture.channel,
         transcript: "",
@@ -1931,8 +1933,11 @@ const BiveyosPage = ({ initialRecordingInfo, embedded = false, onBack }: Biveyos
           </div>
 
           <div className="rounded-xl border border-border bg-card shadow-card">
-            <div className="border-b border-border px-4 py-3">
+            <div className="border-b border-border px-4 py-3 flex items-center justify-between gap-2">
               <h2 className="font-display text-sm font-semibold">Oluşturulan Adaylar</h2>
+              <Badge variant={candidateStorageSource === "supabase" ? "default" : "outline"} className="text-[10px]">
+                {candidateStorageSource === "supabase" ? "Bulut senkron" : candidateStorageSource === "local" ? "Yerel mod" : "Yükleniyor"}
+              </Badge>
             </div>
             <div className="max-h-[360px] overflow-y-auto p-3 space-y-2">
               {candidates.length === 0 ? (

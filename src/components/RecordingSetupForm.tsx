@@ -421,11 +421,12 @@ const RecordingSetupForm = ({ onSubmit }: Props) => {
         ? { type: "mülakat" }
         : { type: "toplantı", meetingTopic: gmeetTopic, participants: gmeetParticipants };
 
-      const { data: analysisData, error: analysisError } = await supabase.functions.invoke("analyze-interview", {
-        body: { transcript: gmeetTranscript, recordingInfo },
-      });
-      if (analysisError) throw new Error(analysisError.message);
-      if (analysisData.error) throw new Error(analysisData.error);
+      const { data: analysisData, error: analysisError } = await invokeEdgeFunction(
+        EDGE_FUNCTIONS.ANALYZE_INTERVIEW,
+        { transcript: gmeetTranscript, recordingInfo },
+      );
+      if (analysisError) throw new Error(getErrorToastMessage(analysisError));
+      if (analysisData?.error) throw new Error(analysisData.error);
 
       await supabase.from("recordings").update({ analysis_data: analysisData.analysis }).eq("id", recording.id);
       toast.success("Analiz tamamlandı!");

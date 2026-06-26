@@ -43,7 +43,7 @@ function parseTranscript(raw: string): TranscriptSegment[] {
 
   for (const line of lines) {
     // Match patterns like "[Speaker 1]:", "Speaker 1:", "[00:01:23] Speaker:", etc.
-    const speakerMatch = line.match(/^(?:\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*)?(?:\[?([^:\[\]]+?)\]?\s*:\s*)(.+)/);
+    const speakerMatch = line.match(/^(?:\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*)?(?:\[?([^:[\]]+?)\]?\s*:\s*)(.+)/);
 
     if (speakerMatch) {
       // Save previous segment
@@ -96,7 +96,7 @@ function highlightText(text: string, searchQuery: string) {
   patterns.push({ regex: new RegExp(`(${decisionPattern})`, "gi"), type: "decision" });
 
   // Simple approach: split by all patterns
-  let remaining = text;
+  const remaining = text;
   const allPattern = patterns.map(p => p.regex.source).join("|");
   if (!allPattern) return [{ text, type: "normal" as const }];
 
@@ -172,7 +172,11 @@ const SmartTranscriptViewer = ({ transcript, className = "" }: Props) => {
   const toggleSpeaker = (speaker: string) => {
     setCollapsedSpeakers(prev => {
       const next = new Set(prev);
-      next.has(speaker) ? next.delete(speaker) : next.add(speaker);
+      if (next.has(speaker)) {
+        next.delete(speaker);
+      } else {
+        next.add(speaker);
+      }
       return next;
     });
   };

@@ -20,9 +20,16 @@ export const getMeetingStatus = (recording: Recording): MeetingStatus => {
 export const getMeetingSource = (recording: Recording): MeetingSource => {
   const summary = (recording.summary || "").toLowerCase();
   const url = (recording.video_url || "").toLowerCase();
-  if (summary.includes("zoom") || url.includes("zoom")) return "zoom";
-  if (summary.includes("google meet") || summary.includes("gmeet")) return "google-meet";
-  if (url && !url.startsWith("http") && !summary.includes("canlı")) return "upload";
+  const metadata = recording.biveyos_signals as { metadata?: { source_type?: string } } | null;
+  const sourceType = metadata?.metadata?.source_type?.toLowerCase() || "";
+
+  if (summary.includes("zoom") || url.includes("zoom") || sourceType.includes("zoom")) return "zoom";
+  if (summary.includes("google meet") || summary.includes("gmeet") || sourceType.includes("google")) return "google-meet";
+  if (sourceType.includes("upload") || sourceType.includes("upload_")) return "upload";
+  if (url.includes("/storage/v1/object/public/recordings/") || (url.includes("/") && !url.startsWith("http"))) {
+    return summary.includes("canlı") || sourceType.includes("live") ? "live" : "upload";
+  }
+  if (url.startsWith("http")) return summary.includes("canlı") || sourceType.includes("live") ? "live" : "upload";
   return "live";
 };
 

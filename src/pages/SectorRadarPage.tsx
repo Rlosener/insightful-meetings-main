@@ -218,7 +218,7 @@ const SectorRadarPage = () => {
     if (!hasProfile) { toast.error("Önce şirket profilini oluşturun"); return; }
     setAnalyzingId(dev.id);
     try {
-      const { data, error } = await invokeEdgeFunction<SectorAnalysisResponse>("company-advisor", {
+      const { data, error } = await invokeEdgeFunction<SectorAnalysisResponse>(EDGE_FUNCTIONS.COMPANY_ADVISOR, {
         type: "sector_analysis", developmentTitle: dev.title, developmentDescription: dev.description,
       });
       if (error) { toast.error(error.message); return; }

@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { captureVideoFrameDataUrl, sampleLatestFrames } from "@/lib/frameSampling";
 import { attachStreamAndPlay } from "@/lib/mediaPlayback";
+import { formatTranscriptionFailure, type TranscriptionInvokePayload } from "@/features/transcription/services/transcriptionErrors";
 import { isTranscriptUsableForAnalysis, normalizeTranscriptResult } from "@/features/transcription/services/transcriptionNormalizer";
 import { getAudioExtensionByMime, normalizeAudioMimeType } from "@/features/transcription/services/audioMime";
 import type { TranscriptPipelineStatus, TranscriptResult } from "@/features/transcription/types";
@@ -474,15 +475,11 @@ const PracticeInterviewPage = () => {
           : transcriptionBlob.type || "application/octet-stream";
         const { error: uploadError } = await supabase.storage
           .from("recordings")
-          .upload(fileName, transcriptionBlob, { contentType: normalizedContentType, upsert: true });
+          .upload(fileName, transcriptionBlob, { contentType: normalizedContentType, upsert: false });
         if (uploadError) throw uploadError;
 
-        const transcriptResult = await invokeEdgeFunction<{
-          transcript?: string;
+        const transcriptResult = await invokeEdgeFunction<TranscriptionInvokePayload & {
           transcriptResult?: TranscriptResult;
-          provider?: string;
-          providerError?: string;
-          warnings?: string[];
         }>(EDGE_FUNCTIONS.TRANSCRIBE_RECORDING, {
           filePath: fileName,
           recordingType: "mülakat",
@@ -506,7 +503,9 @@ const PracticeInterviewPage = () => {
         setTranscriptProviderLabel(`Provider: ${normalizedTranscript.provider || "bilinmiyor"}`);
 
         if (transcriptResult.error || !normalizedTranscript.text.trim()) {
-          const message = transcriptResult.error ? getErrorToastMessage(transcriptResult.error) : "Transkript oluşturulamadı.";
+          const message = transcriptResult.error
+            ? formatTranscriptionFailure(transcriptResult.error, transcriptResult.data)
+            : "Transkript oluşturulamadı.";
           setTranscript(`[Transkript Hatası]\n${message}\n\nSes dosyası: ${Math.round(transcriptionBlob.size / 1024)} KB, format: ${transcriptionBlob.type || "bilinmiyor"}`);
           setTranscriptStatus("final_failed");
           toast.error(message);

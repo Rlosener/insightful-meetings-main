@@ -7,10 +7,28 @@ import StatCard from "@/components/dashboard/StatCard";
 import LoadingState from "@/components/dashboard/LoadingState";
 import EmptyState from "@/components/dashboard/EmptyState";
 
+const scoreRanges = [
+  { label: "Mükemmel (80-100)", min: 80, max: 100, color: "bg-[hsl(var(--success))]" },
+  { label: "İyi (60-79)", min: 60, max: 79, color: "bg-[hsl(var(--warning))]" },
+  { label: "Geliştirilmeli (<60)", min: 0, max: 59, color: "bg-destructive" },
+];
+
+const readScore = (analysisData: unknown) => {
+  if (!analysisData || typeof analysisData !== "object") return null;
+  const data = analysisData as Record<string, unknown>;
+  const rawScore = data.overall_score
+    ?? data.overallScore
+    ?? (data.character_analysis as Record<string, unknown> | undefined)?.overall_score
+    ?? (data.summary as Record<string, unknown> | undefined)?.overall_score;
+  const score = typeof rawScore === "number" ? rawScore : Number(rawScore);
+  return Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : null;
+};
+
 const AnalyticsPage = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ total: 0, analyzed: 0, avgScore: 0 });
   const [typeData, setTypeData] = useState<any[]>([]);
+  const [scoreData, setScoreData] = useState(scoreRanges.map((range) => ({ ...range, count: 0 })));
 
   useEffect(() => {
     const fetch = async () => {
@@ -25,7 +43,9 @@ const AnalyticsPage = () => {
 
         const recordings = data || [];
         const analyzed = recordings.filter(r => r.analysis_data);
-        const scores = analyzed.map(r => (r.analysis_data as any)?.overall_score).filter(Boolean);
+        const scores = analyzed
+          .map((r) => readScore(r.analysis_data))
+          .filter((score): score is number => score !== null);
         const avg = scores.length ? Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length) : 0;
 
         const meetings = recordings.filter(r => r.type === "toplantı").length;
@@ -36,6 +56,10 @@ const AnalyticsPage = () => {
           { name: "Toplantı", value: meetings, color: "hsl(168 80% 42%)" },
           { name: "Mülakat", value: interviews, color: "hsl(36 90% 55%)" },
         ]);
+        setScoreData(scoreRanges.map((range) => ({
+          ...range,
+          count: scores.filter((score) => score >= range.min && score <= range.max).length,
+        })));
       } catch (e) {
         console.error(e);
       } finally {
@@ -94,20 +118,13 @@ const AnalyticsPage = () => {
         <div className="rounded-xl border border-border bg-card p-5 shadow-card">
           <h2 className="font-display text-sm font-semibold mb-4">Skor Dağılımı</h2>
           <div className="space-y-3">
-            {[
-              { label: "Mükemmel (80-100)", min: 80, max: 100, color: "bg-[hsl(var(--success))]" },
-              { label: "İyi (60-79)", min: 60, max: 79, color: "bg-[hsl(var(--warning))]" },
-              { label: "Geliştirilmeli (<60)", min: 0, max: 59, color: "bg-destructive" },
-            ].map(range => {
-              const count = stats.analyzed > 0 ? 0 : 0; // placeholder
-              return (
-                <div key={range.label} className="flex items-center gap-3">
-                  <div className={`h-2 w-2 rounded-full ${range.color}`} />
-                  <span className="text-xs text-muted-foreground flex-1">{range.label}</span>
-                  <span className="text-xs font-medium">{count}</span>
-                </div>
-              );
-            })}
+            {scoreData.map((range) => (
+              <div key={range.label} className="flex items-center gap-3">
+                <div className={`h-2 w-2 rounded-full ${range.color}`} />
+                <span className="text-xs text-muted-foreground flex-1">{range.label}</span>
+                <span className="text-xs font-medium">{range.count}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>

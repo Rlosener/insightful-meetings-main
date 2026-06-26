@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, handleAIError } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,6 +18,8 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("generate-practice-questions", aiProviderChecks(), corsHeaders);
     const {
       candidateName,
       position,
@@ -31,7 +34,7 @@ serve(async (req) => {
       cvText,
       cvFileName,
       jobDescription,
-    } = await req.json();
+    } = body as Record<string, any>;
 
     const difficultyMap: Record<string, string> = {
       easy: "Kolay — giriş seviyesi, genel sorular. Adayı rahatlatacak, temel yetkinlikleri ölçecek sorular.",

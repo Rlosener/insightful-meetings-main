@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:readiness": "node scripts/check-readiness.mjs",
+    "deploy:functions": "supabase functions deploy analyze-interview meeting-assistant analyze-facial-expressions analyze-member-profile save-member-insights analyze-company analyze-practice-interview analyze-character-overall zoom-import generate-practice-questions ai-career-coach career-coach-chat career-coach-insights analyze-career-profile parse-linkedin generate-daily-training analyze-micro-test transcribe-recording process-recording company-advisor biveyos-pre-evaluation --project-ref zmaqqipujjwzviuthjzg"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

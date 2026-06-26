@@ -10,9 +10,13 @@
  */
 
 // ── Public Supabase Config (safe for frontend) ──────────────────────────
-export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://zmaqqipujjwzviuthjzg.supabase.co";
-export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InptYXFxaXB1amp3enZpdXRoanpnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMTE1OTcsImV4cCI6MjA4ODU4NzU5N30.wtJnV3C1AeIAIC6gHTo84kOl9IU6MpHnEU_YeH_uA48";
-export const SUPABASE_PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID || "zmaqqipujjwzviuthjzg";
+export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "";
+export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "";
+export const SUPABASE_PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "";
+
+if (import.meta.env.DEV && (!SUPABASE_URL || !SUPABASE_ANON_KEY)) {
+  console.warn("[config] VITE_SUPABASE_URL ve VITE_SUPABASE_PUBLISHABLE_KEY .env dosyasında tanımlı olmalı.");
+}
 
 // ── Edge Function Names ─────────────────────────────────────────────────
 export const EDGE_FUNCTIONS = {

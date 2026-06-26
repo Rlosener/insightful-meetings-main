@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Video, Square, Camera, Loader2, Clock, RotateCcw, CheckCircle2, Lightbulb, ArrowRight, Upload, Globe, AlertCircle, Mic, Plus, Trash2, Volume2, RefreshCw } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { RecordingInfo, InterviewQuestion } from "@/types/recording";
 import { extractBiveyosSignals } from "@/types/biveyos";
@@ -23,6 +23,9 @@ import { invokeEdgeFunction, getErrorToastMessage } from "@/lib/edgeFunctionClie
 import { captureVideoFrameDataUrl, sampleLatestFrames } from "@/lib/frameSampling";
 import { attachStreamAndPlay } from "@/lib/mediaPlayback";
 import { EDGE_FUNCTIONS } from "@/config/api";
+import { formatTranscriptionFailure, type TranscriptionInvokePayload } from "@/features/transcription/services/transcriptionErrors";
+import { isValidAudioBlob } from "@/lib/storagePaths";
+import { detectWebSpeechSupport, webSpeechSupportMessage, type WebSpeechSupport } from "@/lib/webSpeech";
 
 type AnalysisMode = "live" | "file" | "zoom" | "meet";
 type RecordingState = "setup" | "questions" | "biveyos" | "idle" | "previewing" | "recording" | "recorded" | "analyzing" | "done";
@@ -79,11 +82,38 @@ interface MicChannel {
   deviceId: string;
 }
 
+type TranscriptionHealthStatus = "idle" | "checking" | "ready" | "misconfigured" | "error";
+
+interface TranscriptionHealthResponse {
+  status?: "ok" | "misconfigured" | "error";
+  function?: string;
+  checks?: Record<string, boolean | string>;
+  providers?: Record<string, boolean>;
+  message?: string;
+}
+
+interface TranscriptionHealthState {
+  status: TranscriptionHealthStatus;
+  message: string;
+  providers: Record<string, boolean>;
+}
+
 const DEFAULT_MIC_CHANNELS: MicChannel[] = [
   { id: "speaker-1", speaker: "Konuşmacı 1", deviceId: "" },
 ];
 const FRAME_CAPTURE_INTERVAL_MS = 2000;
 const FACIAL_ANALYSIS_FRAME_COUNT = 4;
+const TRANSCRIPTION_PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  google: "Google",
+  gemini: "Gemini",
+  lovable: "Lovable",
+  custom_ai: "Custom AI",
+};
+const ANALYSIS_MODES = ["live", "file", "zoom", "meet"] as const satisfies readonly AnalysisMode[];
+
+const normalizeAnalysisMode = (mode: string | null): AnalysisMode | null =>
+  ANALYSIS_MODES.includes(mode as AnalysisMode) ? (mode as AnalysisMode) : null;
 
 const chooseAudioMimeType = () => {
   const candidates = [
@@ -108,7 +138,8 @@ const getErrorMessage = (error: unknown, fallback: string) =>
 
 const RecordPage = () => {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<AnalysisMode>("live");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [mode, setMode] = useState<AnalysisMode>(() => normalizeAnalysisMode(new URLSearchParams(window.location.search).get("mode")) || "live");
   const [state, setState] = useState<RecordingState>("setup");
   const [recordingInfo, setRecordingInfo] = useState<RecordingInfo | null>(null);
   const [duration, setDuration] = useState(0);
@@ -124,6 +155,12 @@ const RecordPage = () => {
   const [micChannels, setMicChannels] = useState<MicChannel[]>(DEFAULT_MIC_CHANNELS);
   const [micLevels, setMicLevels] = useState<Record<string, number>>({});
   const [micError, setMicError] = useState<string | null>(null);
+  const [webSpeechSupport] = useState<WebSpeechSupport>(() => detectWebSpeechSupport());
+  const [transcriptionHealth, setTranscriptionHealth] = useState<TranscriptionHealthState>({
+    status: "idle",
+    message: "Transkript altyapısı henüz kontrol edilmedi.",
+    providers: {},
+  });
   const videoRef = useRef<HTMLVideoElement>(null);
   const playbackRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -255,6 +292,49 @@ const RecordPage = () => {
     }
   }, []);
 
+  const checkTranscriptionHealth = useCallback(async () => {
+    setTranscriptionHealth((previous) => ({
+      ...previous,
+      status: "checking",
+      message: "Transkript sağlayıcıları kontrol ediliyor.",
+    }));
+
+    const result = await invokeEdgeFunction<TranscriptionHealthResponse>(
+      EDGE_FUNCTIONS.TRANSCRIBE_RECORDING,
+      { health: true },
+      { maxRetries: 0, timeoutMs: 30000 },
+    );
+
+    if (result.error) {
+      const healthContractPending = result.error.type === "VALIDATION";
+      setTranscriptionHealth({
+        status: healthContractPending ? "misconfigured" : "error",
+        message: healthContractPending
+          ? "Transkript health kontratı deploy/config güncellemesi bekliyor."
+          : getErrorToastMessage(result.error),
+        providers: {},
+      });
+      return;
+    }
+
+    const checks = result.data?.checks || {};
+    const providers = result.data?.providers || Object.fromEntries(
+      Object.keys(TRANSCRIPTION_PROVIDER_LABELS).map((provider) => [provider, checks[provider] === true]),
+    );
+    const hasConfiguredProvider = Object.values(providers).some(Boolean) || checks.providerReady === true;
+    const status = result.data?.status === "ok" || hasConfiguredProvider ? "ready" : "misconfigured";
+
+    setTranscriptionHealth({
+      status,
+      providers,
+      message: result.data?.message || (
+        status === "ready"
+          ? "En az bir transkript sağlayıcısı aktif."
+          : "Transkript sağlayıcısı bulunamadı. Final transkript üretimi başarısız olabilir."
+      ),
+    });
+  }, []);
+
   useEffect(() => {
     return () => stopLiveFeatures();
   }, [stopLiveFeatures]);
@@ -262,6 +342,12 @@ const RecordPage = () => {
   useEffect(() => {
     refreshAudioDevices();
   }, [refreshAudioDevices]);
+
+  useEffect(() => {
+    if ((mode === "live" || mode === "file") && transcriptionHealth.status === "idle") {
+      void checkTranscriptionHealth();
+    }
+  }, [checkTranscriptionHealth, mode, transcriptionHealth.status]);
 
   useEffect(() => {
     if (mode === "live") return;
@@ -603,10 +689,6 @@ const RecordPage = () => {
 
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("recordings")
-        .getPublicUrl(fileName);
-
       let analysisTranscript = transcript.trim();
       if (analysisTranscript.length < 50) {
         toast.info("Canlı transkript kısa kaldı. Kayıt sesinden transkript hazırlanıyor.");
@@ -618,16 +700,21 @@ const RecordPage = () => {
           setState("recorded");
           return;
         }
+        if (!isValidAudioBlob(transcriptionBlob)) {
+          toast.error(`Ses kaydı çok küçük (${transcriptionBlob.size} byte). Mikrofon izinlerini ve ses seviyesini kontrol edin.`);
+          setState("recorded");
+          return;
+        }
         const transcriptionFileName = `${user.id}/${Date.now()}-transcript.${extensionForBlob(transcriptionBlob)}`;
         const { error: transcriptionUploadError } = await supabase.storage
           .from("recordings")
-          .upload(transcriptionFileName, transcriptionBlob, { contentType: transcriptionBlob.type || "application/octet-stream", upsert: true });
+          .upload(transcriptionFileName, transcriptionBlob, { contentType: transcriptionBlob.type || "application/octet-stream", upsert: false });
         if (transcriptionUploadError) throw transcriptionUploadError;
 
         const participants = recordingInfo?.type === "toplantı"
           ? recordingInfo.participants || micChannels.map((channel) => channel.speaker)
           : [recordingInfo?.candidateName ? `${recordingInfo.candidateName} ${recordingInfo.candidateSurname}` : "Aday"];
-        const transcriptResult = await invokeEdgeFunction<{ transcript: string }>(EDGE_FUNCTIONS.TRANSCRIBE_RECORDING, {
+        const transcriptResult = await invokeEdgeFunction<TranscriptionInvokePayload>(EDGE_FUNCTIONS.TRANSCRIBE_RECORDING, {
           filePath: transcriptionFileName,
           recordingType: recordingInfo?.type || "toplantı",
           participants,
@@ -638,7 +725,7 @@ const RecordPage = () => {
           analysisTranscript = transcriptResult.data.transcript.trim();
           setTranscript(analysisTranscript);
         } else if (transcriptResult.error) {
-          const message = getErrorToastMessage(transcriptResult.error);
+          const message = formatTranscriptionFailure(transcriptResult.error, transcriptResult.data);
           setTranscript(`[Transkript Hatası]\n${message}\n\nSes dosyası: ${Math.round(transcriptionBlob.size / 1024)} KB, format: ${transcriptionBlob.type || "bilinmiyor"}`);
           toast.error(message);
           setState("recorded");
@@ -712,7 +799,7 @@ const RecordPage = () => {
           : recordingInfo?.meetingTopic || "Yeni Kayıt",
         type: recordingInfo?.type || "toplantı",
         duration: formatTime(duration),
-        video_url: publicUrl,
+        video_url: fileName,
         transcript: analysisTranscript,
         analysis_data: fullAnalysis as Json,
         biveyos_signals: biveyosSignals as Json,
@@ -782,6 +869,10 @@ const RecordPage = () => {
   const showTranscriptPanel = showCameraArea && state !== "idle";
 
   const isLiveActive = mode === "live" && state !== "setup";
+  const showTranscriptionHealth = (mode === "live" || mode === "file") && !isLiveActive;
+  const activeTranscriptProviders = Object.entries(transcriptionHealth.providers)
+    .filter(([, configured]) => configured)
+    .map(([provider]) => TRANSCRIPTION_PROVIDER_LABELS[provider] || provider);
 
   const handleModeChange = (nextMode: AnalysisMode) => {
     if (nextMode !== "live") {
@@ -790,7 +881,23 @@ const RecordPage = () => {
       setCameraError(null);
     }
     setMode(nextMode);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("mode", nextMode);
+    setSearchParams(nextParams, { replace: false });
   };
+
+  useEffect(() => {
+    const queryMode = normalizeAnalysisMode(searchParams.get("mode"));
+    if (!queryMode) return;
+    if (queryMode === mode) return;
+
+    if (queryMode !== "live") {
+      resetLiveSession();
+    } else {
+      setCameraError(null);
+    }
+    setMode(queryMode);
+  }, [mode, resetLiveSession, searchParams]);
 
   return (
     <div className={`${state === "biveyos" ? "max-w-7xl" : "max-w-5xl"} mx-auto space-y-6`}>
@@ -829,6 +936,67 @@ const RecordPage = () => {
               {label}
             </button>
           ))}
+        </div>
+      )}
+
+      {showTranscriptionHealth && (
+        <div className={`rounded-xl border p-4 shadow-card ${
+          transcriptionHealth.status === "ready"
+            ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+            : transcriptionHealth.status === "misconfigured" || transcriptionHealth.status === "error"
+              ? "border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/5"
+              : "border-border bg-card"
+        }`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                transcriptionHealth.status === "ready"
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  : "bg-background text-muted-foreground"
+              }`}>
+                {transcriptionHealth.status === "checking" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : transcriptionHealth.status === "ready" ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <AlertCircle className="h-4 w-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h2 className="font-display text-sm font-semibold">Transkript Durumu</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{transcriptionHealth.message}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(activeTranscriptProviders.length > 0 ? activeTranscriptProviders : ["Sağlayıcı yok"]).map((provider) => (
+                    <span
+                      key={provider}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                        activeTranscriptProviders.length > 0
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {provider}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={checkTranscriptionHealth}
+              disabled={transcriptionHealth.status === "checking"}
+              className="w-full sm:w-auto"
+            >
+              {transcriptionHealth.status === "checking" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Kontrol Et
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1107,14 +1275,26 @@ const RecordPage = () => {
           </div>
 
           {showTranscriptPanel && (
-            <TranscriptViewer
-              entries={state === "done" ? [] : transcriptEntries}
-              transcript={transcript}
-              title="Canlı Transkript"
-              description="Kayıt sırasında yakalanan konuşmalar burada anlık olarak görünür; analizde nihai transkript kullanılır."
-              emptyMessage="Henüz konuşma algılanmadı. Kayıt başladığında transkript bu panelde görünecek."
-              heightClassName="h-[260px]"
-            />
+            <>
+              <div className={`rounded-xl border px-4 py-3 text-sm ${
+                webSpeechSupport === "supported"
+                  ? "border-primary/20 bg-primary/5 text-muted-foreground"
+                  : "border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/10 text-foreground"
+              }`}>
+                <div className="flex items-start gap-2">
+                  <AlertCircle className={`mt-0.5 h-4 w-4 shrink-0 ${webSpeechSupport === "supported" ? "text-primary" : "text-[hsl(var(--warning))]"}`} />
+                  <span>{webSpeechSupportMessage(webSpeechSupport)}</span>
+                </div>
+              </div>
+              <TranscriptViewer
+                entries={state === "done" ? [] : transcriptEntries}
+                transcript={transcript}
+                title="Canlı Transkript"
+                description="Kayıt sırasında yakalanan konuşmalar burada anlık olarak görünür; analizde nihai transkript kullanılır."
+                emptyMessage="Henüz konuşma algılanmadı. Kayıt başladığında transkript bu panelde görünecek."
+                heightClassName="h-[260px]"
+              />
+            </>
           )}
 
           {state === "recorded" && (

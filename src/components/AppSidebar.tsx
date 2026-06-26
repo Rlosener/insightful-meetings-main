@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   Bird, LayoutDashboard, Video, BarChart3, Settings, LogOut,
   Camera, Building2, Menu, X, FileText, CreditCard, Sun, Moon,
-  User, Brain, Radar, UserCircle
+  User, Brain, Radar, UserCircle, TrendingUp, Plug
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -31,10 +31,12 @@ const companyNav: SidebarItem[] = [
 
 const insightNav: SidebarItem[] = [
   { to: "/dashboard/advisor", icon: Brain, label: "AI Şirket Danışmanı" },
+  { to: "/dashboard/analytics", icon: TrendingUp, label: "Analitik" },
   { to: "/dashboard/reports", icon: FileText, label: "Raporlar" },
 ];
 
 const systemNav: SidebarItem[] = [
+  { to: "/dashboard/integrations", icon: Plug, label: "Entegrasyonlar" },
   { to: "/dashboard/billing", icon: CreditCard, label: "Faturalandırma" },
   { to: "/dashboard/settings", icon: Settings, label: "Ayarlar" },
 ];

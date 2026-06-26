@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, handleAIError } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +11,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { practices } = await req.json();
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("ai-career-coach", aiProviderChecks(), corsHeaders);
+    const { practices } = body as { practices?: any[] };
 
     const practicesSummary = (practices || []).map((p: any, i: number) =>
       `Oturum ${i + 1} (${p.created_at}): Pozisyon: ${p.position} | Departman: ${p.department || "?"} | Süre: ${p.duration || "?"} | Skor: ${p.character_analysis?.overall_score || "?"}/100 | İletişim: ${p.analysis_data?.communication_score || "?"} | Özgüven: ${p.analysis_data?.confidence_score || "?"} | Teknik: ${p.analysis_data?.technical_score || "?"} | Güçlü: ${(p.character_analysis?.strengths || []).slice(0, 5).join(", ")} | Zayıf: ${(p.character_analysis?.weaknesses || []).slice(0, 5).join(", ")}`

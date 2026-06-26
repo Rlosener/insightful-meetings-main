@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,15 +26,7 @@ const AuthPage = () => {
 
   const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
-        navigateByAccountType(data.session.user);
-      }
-    });
-  }, []);
-
-  const navigateByAccountType = async (user: any) => {
+  const navigateByAccountType = useCallback(async (user: any) => {
     if (redirectTo) {
       navigate(redirectTo, { replace: true });
       return;
@@ -48,7 +40,15 @@ const AuthPage = () => {
 
     const type = profile?.account_type || user.user_metadata?.account_type || "individual";
     navigate(type === "corporate" ? "/dashboard" : "/individual", { replace: true });
-  };
+  }, [navigate, redirectTo]);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        navigateByAccountType(data.session.user);
+      }
+    });
+  }, [navigateByAccountType]);
 
   const getFriendlyError = (err: any) => {
     const msg = (err?.message ?? "").toString();

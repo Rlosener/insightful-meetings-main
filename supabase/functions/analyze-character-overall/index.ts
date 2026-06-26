@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, parseAIResponse } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +11,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { practices } = await req.json();
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("analyze-character-overall", aiProviderChecks(), corsHeaders);
+    const { practices } = body as { practices?: any[] };
 
     const summary = (practices || []).slice(0, 8).map((p: any, i: number) =>
       `P${i + 1}: ${p.position} | Skor:${p.character_analysis?.overall_score || "?"} İlet:${p.analysis_data?.communication_score || "?"} Özgü:${p.analysis_data?.confidence_score || "?"} | G:${(p.character_analysis?.strengths || []).slice(0, 3).join(",")} Z:${(p.character_analysis?.weaknesses || []).slice(0, 3).join(",")} | Kişilik:${(p.character_analysis?.personality_traits || []).slice(0, 3).join(",")}`

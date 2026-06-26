@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, parseAIResponse } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +11,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { transcript, position, department, experienceYears, skills, frames, questionsAsked, totalQuestions, difficulty, interviewStyle } = await req.json();
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("analyze-practice-interview", aiProviderChecks(), corsHeaders);
+    const { transcript, position, department, experienceYears, skills, frames, questionsAsked, totalQuestions, difficulty, interviewStyle } = body as Record<string, any>;
 
     const response = await callAI({
       messages: [

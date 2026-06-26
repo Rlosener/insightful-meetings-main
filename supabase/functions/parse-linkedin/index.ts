@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, handleAIError } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +11,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { linkedinUrl } = await req.json();
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("parse-linkedin", aiProviderChecks(), corsHeaders);
+    const { linkedinUrl } = body as { linkedinUrl?: string };
     if (!linkedinUrl) {
       return new Response(JSON.stringify({ error: "LinkedIn URL is required" }), {
         status: 400,
@@ -19,7 +22,7 @@ serve(async (req) => {
     }
 
     // Extract username from LinkedIn URL for context
-    const urlMatch = linkedinUrl.match(/linkedin\.com\/in\/([^\/\?]+)/);
+    const urlMatch = linkedinUrl.match(/linkedin\.com\/in\/([^/?]+)/);
     const username = urlMatch ? urlMatch[1] : linkedinUrl;
 
     const systemPrompt = `You are an expert at analyzing LinkedIn profiles. Given a LinkedIn URL, generate a realistic and structured profile based on the username and URL pattern.

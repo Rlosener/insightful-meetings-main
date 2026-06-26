@@ -26,8 +26,8 @@ const statusLabels: Record<EmotionProviderStatus, string> = {
 };
 
 const providerLabels: Record<EmotionProviderName, string> = {
-  internal_vision: "Internal vision analysis aktif",
-  morphcast: "MorphCast aktif",
+  internal_vision: "AI vision analizi aktif",
+  morphcast: "AI vision analizi aktif (MorphCast entegrasyonu devre dışı)",
   disabled: "Duygu analizi devre dışı",
 };
 

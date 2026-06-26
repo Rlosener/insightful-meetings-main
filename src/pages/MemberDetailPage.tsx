@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,18 +56,12 @@ const MemberDetailPage = () => {
     notes: "",
   });
 
-  useEffect(() => {
-    if (memberId) {
-      fetchMember();
-      fetchInsights();
-    }
-  }, [memberId]);
-
-  const fetchMember = async () => {
+  const fetchMember = useCallback(async () => {
+    if (!memberId) return;
     const { data, error } = await supabase
       .from("company_members")
       .select("*")
-      .eq("id", memberId!)
+      .eq("id", memberId)
       .single();
 
     if (error) {
@@ -85,19 +79,25 @@ const MemberDetailPage = () => {
       notes: data.notes || "",
     });
     setLoading(false);
-  };
+  }, [memberId]);
 
-  const fetchInsights = async () => {
+  const fetchInsights = useCallback(async () => {
+    if (!memberId) return;
     const { data, error } = await supabase
       .from("member_meeting_insights")
       .select("*, recordings(id, title, date, type, duration)")
-      .eq("member_id", memberId!)
+      .eq("member_id", memberId)
       .order("created_at", { ascending: false });
 
     if (!error && data) {
       setInsights(data as any);
     }
-  };
+  }, [memberId]);
+
+  useEffect(() => {
+    void fetchMember();
+    void fetchInsights();
+  }, [fetchInsights, fetchMember]);
 
   const handleSave = async () => {
     setSaving(true);

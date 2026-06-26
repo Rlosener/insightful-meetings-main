@@ -22,6 +22,7 @@ import { invokeEdgeFunction, getErrorToastMessage } from "@/lib/edgeFunctionClie
 import { EDGE_FUNCTIONS } from "@/config/api";
 import { extractFramesFromVideo } from "@/lib/videoProcessing";
 import { extractAudioFromVideo, needsAudioExtraction } from "@/lib/audioExtraction";
+import { formatTranscriptionFailure, type TranscriptionInvokePayload } from "@/features/transcription/services/transcriptionErrors";
 
 // ── Types ──────────────────────────────────────────────────────────────
 type FileState = "queued" | "uploading" | "analyzing" | "completed" | "failed" | "server_processing";
@@ -580,6 +581,13 @@ const FileUploadSection = () => {
   // Setup context reference for processing
   const setupContextRef = useRef<SetupContext | undefined>(undefined);
 
+  const clearPollInterval = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
   const setQueueAndRef = useCallback((updater: QueueItem[] | ((prev: QueueItem[]) => QueueItem[])) => {
     setQueue((prev) => {
       const next = typeof updater === "function" ? (updater as (prev: QueueItem[]) => QueueItem[])(prev) : updater;
@@ -591,6 +599,10 @@ const FileUploadSection = () => {
   useEffect(() => {
     queueRef.current = queue;
   }, [queue]);
+
+  const updateItem = useCallback((id: string, updates: Partial<QueueItem>) => {
+    setQueueAndRef((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
+  }, [setQueueAndRef]);
 
   // ── Job polling for server-side processing ──
   const pollJobStatus = useCallback(async (jobId: string, recordingId: string, itemId: string) => {
@@ -633,7 +645,7 @@ const FileUploadSection = () => {
       console.warn("[Upload] Poll error", e);
       return null;
     }
-  }, []);
+  }, [updateItem]);
 
   // Load existing jobs and mark stale ones as failed
   useEffect(() => {
@@ -667,8 +679,8 @@ const FileUploadSection = () => {
       }
     };
     loadExistingJobs();
-    return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
-  }, []);
+    return clearPollInterval;
+  }, [clearPollInterval]);
 
   const setupContext: SetupContext | undefined = selectedType
     ? selectedType === "mülakat"
@@ -686,10 +698,6 @@ const FileUploadSection = () => {
     if (!isSetupValid || !selectedType) return;
     setupContextRef.current = setupContext;
     setPhase("files");
-  };
-
-  const updateItem = (id: string, updates: Partial<QueueItem>) => {
-    setQueueAndRef((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
   };
 
   const addFiles = useCallback((files: FileList | File[]) => {
@@ -910,7 +918,17 @@ const FileUploadSection = () => {
                   continue;
                 }
               } else {
-                console.error("[Upload] process-recording error", processResult.error);
+                const failureMessage = formatTranscriptionFailure(processResult.error, processResult.data as TranscriptionInvokePayload);
+                console.error("[Upload] process-recording error", processResult.error, processResult.data);
+                toast.error(failureMessage);
+                updateItem(next.id, { state: "failed", errorType: "transcription_failed", failedStep: "transcription", progress: 60 });
+                await updateJob(recording.id, {
+                  status: "failed",
+                  failure_reason: failureMessage,
+                  failed_step: "transcription",
+                  error_type: "transcription_failed",
+                });
+                continue;
               }
             } else {
               transcript = processResult.data?.transcript?.trim() || "";
@@ -922,7 +940,7 @@ const FileUploadSection = () => {
             // ── SMALL FILE: Existing inline transcription ──
             updateItem(next.id, { state: "analyzing", progress: 35, pipelineStep: "transcription" });
             const transcribeFilePath = transcriptionFilePath || filePath;
-            const transcriptResult = await invokeEdgeFunction<{ transcript: string }>(
+            const transcriptResult = await invokeEdgeFunction<TranscriptionInvokePayload>(
               EDGE_FUNCTIONS.TRANSCRIBE_RECORDING,
               {
                 filePath: transcribeFilePath,
@@ -934,10 +952,19 @@ const FileUploadSection = () => {
               { maxRetries: 1, timeoutMs: 300000 }
             );
             if (transcriptResult.error) {
-              console.error("[Upload] Transcription error", transcriptResult.error);
-            } else {
-              transcript = transcriptResult.data?.transcript?.trim() || "";
+              const failureMessage = formatTranscriptionFailure(transcriptResult.error, transcriptResult.data);
+              console.error("[Upload] Transcription error", transcriptResult.error, transcriptResult.data);
+              toast.error(failureMessage);
+              updateItem(next.id, { state: "failed", errorType: "transcription_failed", failedStep: "transcription", progress: 45 });
+              await updateJob(recording.id, {
+                status: "failed",
+                failure_reason: failureMessage,
+                failed_step: "transcription",
+                error_type: "transcription_failed",
+              });
+              continue;
             }
+            transcript = transcriptResult.data?.transcript?.trim() || "";
           }
 
           // ── Step 5: Facial analysis (video + behavioral only) ──

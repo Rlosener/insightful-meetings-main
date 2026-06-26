@@ -1,7 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { callAI, parseAIResponse } from "../_shared/ai-client.ts";
+import { assertRecordingOwner, createServiceClient, normalizeUserStoragePath, requireAuthenticatedUser } from "../_shared/auth.ts";
 import { detectEntities, normalizeTranscriptWithEntities } from "../_shared/b2b-intelligence.ts";
+import { healthResponse, transcriptionChecks } from "../_shared/health.ts";
 import { audioInputFormat, normalizeAudioMimeType, transcribeWithSpeechProvider } from "../_shared/transcription-provider.ts";
 
 const corsHeaders = {
@@ -200,12 +201,42 @@ const buildMediaPart = (base64: string, mime: string, filePath: string) => {
   };
 };
 
+const providerHealth = () => ({
+  openai: Boolean(Deno.env.get("OPENAI_API_KEY") || Deno.env.get("OPENAI_TRANSCRIPTION_API_KEY")),
+  google: Boolean(
+    Deno.env.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    || Deno.env.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    || Deno.env.get("GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON")
+    || Deno.env.get("GOOGLE_SPEECH_TO_TEXT_API_KEY")
+    || Deno.env.get("GOOGLE_SPEECH_API_KEY")
+    || Deno.env.get("GOOGLE_CLOUD_SPEECH_API_KEY")
+    || Deno.env.get("GOOGLE_CLOUD_API_KEY"),
+  ),
+  gemini: Boolean(Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_API_KEY")),
+  lovable: Boolean(Deno.env.get("LOVABLE_API_KEY")),
+  custom_ai: Boolean(Deno.env.get("CUSTOM_AI_API_URL") && Deno.env.get("CUSTOM_AI_API_KEY")),
+});
+
 // ── Main handler ────────────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  if (req.method === "GET") {
+    return healthResponse("transcribe-recording", transcriptionChecks(), corsHeaders, {
+      required: ["providerReady"],
+      message: Object.values(providerHealth()).some(Boolean)
+        ? "En az bir transkript sağlayıcısı yapılandırılmış."
+        : "Transkript sağlayıcısı yapılandırılmamış. OPENAI_API_KEY, GEMINI_API_KEY veya LOVABLE_API_KEY ekleyin.",
+    });
+  }
+
   try {
-    const { filePath, recordingId, recordingType, participants, recordingInfo, interviewQuestions } = await req.json();
+    const body = await req.json();
+    if (body?.health === true) {
+      return healthResponse("transcribe-recording", transcriptionChecks(), corsHeaders, { required: ["providerReady"] });
+    }
+
+    const { filePath, recordingId, recordingType, participants, recordingInfo, interviewQuestions } = body;
 
     if (!filePath) {
       return transcriptErrorResponse(
@@ -215,13 +246,25 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[transcribe] Starting for ${filePath}`);
+    const auth = await requireAuthenticatedUser(req, corsHeaders);
+    if (!auth.ok) return auth.response;
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
+    const storagePath = normalizeUserStoragePath(filePath, auth.user.id);
+    if (!storagePath.ok) {
+      return transcriptErrorResponse(
+        storagePath.error,
+        storagePath.error.includes("ait değil") ? 403 : 400,
+        buildTranscriptResult("", { provider: "unknown", error: storagePath.error }),
+      );
+    }
 
-    const detectedMimeType = getMimeType(filePath);
+    console.log(`[transcribe] Starting for ${storagePath.path}`);
+
+    const supabase = createServiceClient();
+    const recordingOwner = await assertRecordingOwner(supabase, auth.user.id, corsHeaders, recordingId);
+    if (!recordingOwner.ok) return recordingOwner.response;
+
+    const detectedMimeType = getMimeType(storagePath.path);
     let mimeType = detectedMimeType.startsWith("audio/")
       ? normalizeAudioMimeType(detectedMimeType)
       : detectedMimeType.split(";")[0].trim();
@@ -232,7 +275,7 @@ serve(async (req) => {
     const typeLabel = recordingType === "mülakat" ? "mülakat" : "toplantı";
 
     // ── Size gate (pre-download) ────────────────────────────────────
-    const storedSize = await getStoredObjectSize(supabase, filePath);
+    const storedSize = await getStoredObjectSize(supabase, storagePath.path);
     if (typeof storedSize === "number") {
       console.log(`[transcribe] Storage size=${storedSize} mime=${mimeType}`);
       if (storedSize > MAX_INLINE_MEDIA_BYTES) {
@@ -250,7 +293,7 @@ serve(async (req) => {
     // ── Download ────────────────────────────────────────────────────
     const { data: blob, error: dlErr } = await supabase.storage
       .from("recordings")
-      .download(filePath);
+      .download(storagePath.path);
 
     if (dlErr || !blob) {
       console.error("[transcribe] Download error:", dlErr);
@@ -301,14 +344,14 @@ serve(async (req) => {
     const mediaKind = isVideo ? "video" : "audio";
     console.log(`[transcribe] Sending inline ${mediaKind} to AI: mime=${mimeType}, detected=${detectedMimeType}, type=${typeLabel}, bytes=${mediaBytes}`);
 
-    const providerResult = await transcribeWithSpeechProvider(mediaBuf, mimeType, filePath, "");
+    const providerResult = await transcribeWithSpeechProvider(mediaBuf, mimeType, storagePath.path, "");
     let parsed: Record<string, unknown> = { confidence: providerResult.provider ? "high" : "unknown", provider: providerResult.provider };
     let transcript = providerResult.transcript.trim();
 
     if (!transcript) {
       console.warn("[transcribe] direct provider failed, falling back to chat multimodal:", providerResult.error);
       const mediaBase64 = toBase64(mediaBuf);
-      const mediaPart = buildMediaPart(mediaBase64, mimeType, filePath);
+      const mediaPart = buildMediaPart(mediaBase64, mimeType, storagePath.path);
 
       // ── AI transcription fallback ─────────────────────────────────
       const response = await callAI({
@@ -405,7 +448,8 @@ MUTLAK KURALLAR:
       const { error: updateErr } = await supabase
         .from("recordings")
         .update({ transcript: finalTranscript })
-        .eq("id", recordingId);
+        .eq("id", recordingId)
+        .eq("user_id", auth.user.id);
 
       if (updateErr) console.error("[transcribe] DB save error:", updateErr);
     }

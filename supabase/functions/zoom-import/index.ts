@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { healthResponse, isHealthRequest, zoomChecks } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -84,9 +85,8 @@ async function safeJsonParse<T>(input: string): Promise<T | null> {
   }
 }
 
-async function parseRequestBody(req: Request): Promise<RequestBody> {
-  const text = await req.text();
-  const parsed = await safeJsonParse<RequestBody>(text);
+function parseRequestBodyText(text: string): RequestBody {
+  const parsed = safeJsonParse<RequestBody>(text);
 
   if (!parsed) {
     throw new Error("Geçersiz istek gövdesi (JSON parse hatası).");
@@ -101,6 +101,10 @@ async function parseRequestBody(req: Request): Promise<RequestBody> {
   }
 
   return parsed;
+}
+
+async function parseRequestBody(req: Request): Promise<RequestBody> {
+  return parseRequestBodyText(await req.text());
 }
 
 async function getZoomAccessToken(): Promise<string> {
@@ -422,7 +426,12 @@ serve(async (req: Request) => {
     let body: RequestBody;
 
     try {
-      body = await parseRequestBody(req);
+      const rawText = await req.text();
+      const rawBody = safeJsonParse<Record<string, unknown>>(rawText);
+      if (rawBody && isHealthRequest(rawBody)) {
+        return healthResponse("zoom-import", zoomChecks(), corsHeaders);
+      }
+      body = parseRequestBodyText(rawText);
     } catch (error) {
       const message = normalizeErrorMessage(error);
       console.error("[zoom-import] Validation error:", message);

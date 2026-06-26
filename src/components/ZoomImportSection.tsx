@@ -134,7 +134,6 @@ const ZoomImportSection = () => {
         return;
       }
 
-      const { data: { publicUrl } } = supabase.storage.from("recordings").getPublicUrl(filePath);
       const title = manualTopic.trim() || recordingFile.name || "Zoom Kaydı";
       const duration = manualDuration.trim() || null;
 
@@ -146,7 +145,7 @@ const ZoomImportSection = () => {
           transcript: transcript.trim(),
           user_id: user.id,
           duration,
-          video_url: publicUrl,
+          video_url: filePath,
           summary: `Zoom kayıt ve transkript dosyası yüklenerek içe aktarıldı. Katılımcı: ${participants.length}. Analiz hazırlanıyor...`,
         })
         .select()
@@ -225,9 +224,9 @@ const ZoomImportSection = () => {
             <Video className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h3 className="font-display text-sm font-semibold mb-0.5">Zoom Kayıt Yükleme</h3>
+            <h3 className="font-display text-sm font-semibold mb-0.5">Zoom Kayıt Yükleme (Manuel)</h3>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Zoom kayıt dosyasını ve Zoom transkript dosyasını yükleyerek toplantı veya mülakat analizi başlatın.
+              Zoom API otomatik çekimi henüz aktif değil. Zoom kayıt ve transkript dosyalarını manuel yükleyerek analiz başlatın.
             </p>
           </div>
         </div>

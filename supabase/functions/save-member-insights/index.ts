@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { assertRecordingOwner, createServiceClient, jsonResponse, requireAuthenticatedUser } from "../_shared/auth.ts";
+import { healthResponse, isHealthRequest, readJsonBody, supabaseChecks } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,17 +11,24 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { userId, recordingId, participantsAnalysis } = await req.json();
-
-    if (!userId || !recordingId || !participantsAnalysis) {
-      return new Response(JSON.stringify({ error: "Missing data" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) {
+      return healthResponse("save-member-insights", supabaseChecks({ serviceRole: true }), corsHeaders);
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const auth = await requireAuthenticatedUser(req, corsHeaders);
+    if (!auth.ok) return auth.response;
+
+    const { recordingId, participantsAnalysis } = body as Record<string, any>;
+    const userId = auth.user.id;
+
+    if (!recordingId || !participantsAnalysis) {
+      return jsonResponse({ error: "Missing data" }, 400, corsHeaders);
+    }
+
+    const supabase = createServiceClient();
+    const recordingOwner = await assertRecordingOwner(supabase, userId, corsHeaders, recordingId);
+    if (!recordingOwner.ok) return recordingOwner.response;
 
     // Get all company members for this user
     const { data: members, error: membersError } = await supabase

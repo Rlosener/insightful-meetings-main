@@ -2,7 +2,7 @@
  * Centralized Edge Function client with retry, timeout, and detailed error handling.
  */
 import { supabase } from "@/integrations/supabase/client";
-import { API_DEFAULTS } from "@/config/api";
+import { API_DEFAULTS, SUPABASE_URL } from "@/config/api";
 
 // ── Error Types ─────────────────────────────────────────────────────────
 export type EdgeFunctionErrorType =
@@ -30,22 +30,60 @@ export interface EdgeFunctionResult<T = any> {
   error: EdgeFunctionError | null;
 }
 
+export interface EdgeFunctionStreamResult {
+  response: Response | null;
+  error: EdgeFunctionError | null;
+}
+
 // ── Classification ──────────────────────────────────────────────────────
-function classifyError(status: number, body: any): EdgeFunctionError {
-  const serverMsg = body?.error || body?.message || "";
+function buildErrorDetail(body: Record<string, unknown> | null | undefined) {
+  const serverMsg = typeof body?.error === "string"
+    ? body.error
+    : typeof body?.message === "string"
+      ? body.message
+      : "";
+  const providerErrors = Array.isArray(body?.providerErrors)
+    ? body.providerErrors
+      .map((item) => {
+        if (!item || typeof item !== "object") return "";
+        const record = item as { provider?: string; error?: string };
+        return record.provider && record.error ? `${record.provider}: ${record.error}` : "";
+      })
+      .filter(Boolean)
+      .join(" | ")
+    : "";
+  const providerError = typeof body?.providerError === "string" ? body.providerError : "";
+  return [serverMsg, providerErrors, providerError].filter(Boolean).join(" — ");
+}
 
-  if (status === 400) return { type: "VALIDATION", message: "İstek verisi geçersiz. Lütfen bilgileri kontrol edip tekrar deneyin.", detail: serverMsg, status };
+function classifyError(status: number, body: Record<string, unknown> | null | undefined): EdgeFunctionError {
+  const serverMsg = typeof body?.error === "string"
+    ? body.error
+    : typeof body?.message === "string"
+      ? body.message
+      : "";
+  const detail = buildErrorDetail(body);
+
+  if (status === 400) return { type: "VALIDATION", message: "İstek verisi geçersiz. Lütfen bilgileri kontrol edip tekrar deneyin.", detail, status };
   if (status === 401 || status === 403) {
-    if (/scope/i.test(serverMsg)) return { type: "AUTH", message: "Zoom uygulamasında gerekli izinler (scope) eksik. Zoom Marketplace'ten izinleri güncelleyin.", detail: serverMsg, status };
-    if (/zoom/i.test(serverMsg)) return { type: "AUTH", message: typeof serverMsg === "string" ? serverMsg : "Zoom bağlantı hatası.", detail: serverMsg, status };
-    return { type: "AUTH", message: "Oturum süresi dolmuş veya yetkiniz yok. Lütfen tekrar giriş yapın.", detail: serverMsg, status };
+    if (/scope/i.test(serverMsg)) return { type: "AUTH", message: "Zoom uygulamasında gerekli izinler (scope) eksik. Zoom Marketplace'ten izinleri güncelleyin.", detail, status };
+    if (/zoom/i.test(serverMsg)) return { type: "AUTH", message: serverMsg || "Zoom bağlantı hatası.", detail, status };
+    return { type: "AUTH", message: "Oturum süresi dolmuş veya yetkiniz yok. Lütfen tekrar giriş yapın.", detail, status };
   }
-  if (status === 402) return { type: "PAYMENT", message: "AI kredisi tükendi. Lütfen hesabınıza kredi ekleyin.", detail: serverMsg, status };
-  if (status === 404) return { type: "NOT_FOUND", message: "İstenen kaynak bulunamadı. ID veya URL'yi kontrol edin.", detail: serverMsg, status };
-  if (status === 429) return { type: "RATE_LIMIT", message: "Çok fazla istek gönderildi. Lütfen birkaç dakika bekleyip tekrar deneyin.", detail: serverMsg, status };
-  if (status >= 500) return { type: "SERVER", message: "Sunucu hatası oluştu. Lütfen birkaç saniye sonra tekrar deneyin.", detail: serverMsg, status };
+  if (status === 402) return { type: "PAYMENT", message: "AI kredisi tükendi. Lütfen hesabınıza kredi ekleyin.", detail, status };
+  if (status === 404) return { type: "NOT_FOUND", message: "İstenen kaynak bulunamadı. ID veya URL'yi kontrol edin.", detail, status };
+  if (status === 422) {
+    return {
+      type: "VALIDATION",
+      message: serverMsg || "İşlem tamamlanamadı. Gönderilen veri geçerli değil veya yetersiz.",
+      detail,
+      status,
+    };
+  }
+  if (status === 429) return { type: "RATE_LIMIT", message: "Çok fazla istek gönderildi. Lütfen birkaç dakika bekleyip tekrar deneyin.", detail, status };
+  if (status >= 500) return { type: "SERVER", message: "Sunucu hatası oluştu. Lütfen birkaç saniye sonra tekrar deneyin.", detail, status };
 
-  return { type: "UNKNOWN", message: serverMsg || `Beklenmeyen hata (${status})`, detail: serverMsg, status };
+  return { type: "UNKNOWN", message: serverMsg || `Beklenmeyen hata (${status})`, detail, status };
 }
 
 function isRetryable(status: number): boolean {
@@ -54,6 +92,18 @@ function isRetryable(status: number): boolean {
 
 // ── Sleep ───────────────────────────────────────────────────────────────
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function readResponseBody(response: Response): Promise<Record<string, unknown>> {
+  try {
+    return await response.clone().json();
+  } catch {
+    try {
+      return { error: await response.clone().text() };
+    } catch {
+      return {};
+    }
+  }
+}
 
 // ── Main Invoke ─────────────────────────────────────────────────────────
 export async function invokeEdgeFunction<T = any>(
@@ -90,6 +140,9 @@ export async function invokeEdgeFunction<T = any>(
 
       const { data, error } = await supabase.functions.invoke(functionName, {
         body,
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+        },
         signal: controller.signal,
         timeout: timeoutMs,
       });
@@ -167,6 +220,73 @@ export async function invokeEdgeFunction<T = any>(
   }
 
   return { data: null, error: lastError || { type: "UNKNOWN", message: "İşlem başarısız oldu." } };
+}
+
+export async function invokeEdgeFunctionStream(
+  functionName: string,
+  body: Record<string, any>,
+  options?: { timeoutMs?: number }
+): Promise<EdgeFunctionStreamResult> {
+  if (!SUPABASE_URL) {
+    return {
+      response: null,
+      error: {
+        type: "VALIDATION",
+        message: "Supabase URL yapılandırılmamış.",
+        detail: "Missing VITE_SUPABASE_URL",
+      },
+    };
+  }
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData?.session?.access_token) {
+    return {
+      response: null,
+      error: {
+        type: "AUTH",
+        message: "Oturum bulunamadı. Lütfen tekrar giriş yapın.",
+        detail: "No active supabase session",
+        status: 401,
+      },
+    };
+  }
+
+  const timeoutMs = options?.timeoutMs ?? API_DEFAULTS.TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionData.session.access_token}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      const bodyJson = await readResponseBody(response);
+      return { response: null, error: classifyError(response.status, bodyJson) };
+    }
+
+    return { response, error: null };
+  } catch (err: any) {
+    clearTimeout(timer);
+    if (err?.name === "AbortError") {
+      return { response: null, error: { type: "TIMEOUT", message: "İstek zaman aşımına uğradı. Lütfen tekrar deneyin." } };
+    }
+    return {
+      response: null,
+      error: {
+        type: /failed to fetch|networkerror|load failed/i.test(err?.message || "") ? "NETWORK" : "UNKNOWN",
+        message: err?.message || "Bilinmeyen hata oluştu.",
+        detail: err?.stack,
+      },
+    };
+  }
 }
 
 /**

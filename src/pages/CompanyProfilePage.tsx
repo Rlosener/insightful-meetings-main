@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,9 +78,7 @@ const CompanyProfilePage = () => {
   const [saving, setSaving] = useState(false);
   const [isNew, setIsNew] = useState(true);
 
-  useEffect(() => { fetchProfile(); }, []);
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate("/auth"); return; }
@@ -116,7 +114,9 @@ const CompanyProfilePage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => { void fetchProfile(); }, [fetchProfile]);
 
   const saveProfile = async () => {
     setSaving(true);

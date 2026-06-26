@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Target, User, Calendar, AlertTriangle, CheckCircle2,
   Circle, Lightbulb, Plus, Trash2, ChevronDown, ChevronUp,
@@ -46,30 +46,7 @@ const ActionItemsList = ({ recordingId, analysisActionItems }: Props) => {
   const [newTask, setNewTask] = useState("");
   const [synced, setSynced] = useState(false);
 
-  // Fetch existing items from DB
-  useEffect(() => {
-    fetchItems();
-  }, [recordingId]);
-
-  const fetchItems = async () => {
-    const { data, error } = await supabase
-      .from("action_items")
-      .select("*")
-      .eq("recording_id", recordingId)
-      .order("sort_order", { ascending: true });
-
-    if (!error && data) {
-      setItems(data as ActionItem[]);
-      // If no DB items exist and analysis has structured items, sync them
-      if (data.length === 0 && analysisActionItems?.length && !synced) {
-        setSynced(true);
-        syncFromAnalysis();
-      }
-    }
-    setLoading(false);
-  };
-
-  const syncFromAnalysis = async () => {
+  const syncFromAnalysis = useCallback(async () => {
     if (!analysisActionItems?.length) return;
 
     const { data: userData } = await supabase.auth.getUser();
@@ -106,7 +83,30 @@ const ActionItemsList = ({ recordingId, analysisActionItems }: Props) => {
     if (!error && data) {
       setItems(data as ActionItem[]);
     }
-  };
+  }, [analysisActionItems, recordingId]);
+
+  const fetchItems = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("action_items")
+      .select("*")
+      .eq("recording_id", recordingId)
+      .order("sort_order", { ascending: true });
+
+    if (!error && data) {
+      setItems(data as ActionItem[]);
+      // If no DB items exist and analysis has structured items, sync them
+      if (data.length === 0 && analysisActionItems?.length && !synced) {
+        setSynced(true);
+        void syncFromAnalysis();
+      }
+    }
+    setLoading(false);
+  }, [analysisActionItems?.length, recordingId, synced, syncFromAnalysis]);
+
+  // Fetch existing items from DB
+  useEffect(() => {
+    void fetchItems();
+  }, [fetchItems]);
 
   const toggleStatus = async (item: ActionItem) => {
     const newStatus = item.status === "complete" ? "incomplete" : "complete";

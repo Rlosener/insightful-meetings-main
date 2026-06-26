@@ -1,7 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { callAI, parseAIResponse } from "../_shared/ai-client.ts";
+import {
+  assertProcessingJobOwner,
+  assertRecordingOwner,
+  createServiceClient,
+  jsonResponse,
+  normalizeUserStoragePath,
+  requireAuthenticatedUser,
+} from "../_shared/auth.ts";
 import { detectEntities, normalizeTranscriptWithEntities } from "../_shared/b2b-intelligence.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody, supabaseChecks, transcriptionChecks } from "../_shared/health.ts";
 import { audioInputFormat, transcribeWithSpeechProvider } from "../_shared/transcription-provider.ts";
 
 const corsHeaders = {
@@ -202,19 +210,40 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { filePath, recordingId, jobId, recordingType, participants, recordingInfo, interviewQuestions } = await req.json();
-
-    if (!filePath || !recordingId) {
-      return new Response(JSON.stringify({ error: "filePath and recordingId are required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) {
+      return healthResponse("process-recording", {
+        ...supabaseChecks({ serviceRole: true }),
+        ...aiProviderChecks(),
+        ...transcriptionChecks(),
+      }, corsHeaders, { required: ["supabaseUrl", "supabaseServiceRoleKey", "aiProvider", "providerReady"] });
     }
 
-    console.log(`[process] Starting for ${filePath} recording=${recordingId} job=${jobId}`);
+    const { filePath, recordingId, jobId, recordingType, participants, recordingInfo, interviewQuestions } = body as Record<string, any>;
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
+    if (!filePath || !recordingId) {
+      return jsonResponse({ error: "filePath and recordingId are required" }, 400, corsHeaders);
+    }
+
+    const auth = await requireAuthenticatedUser(req, corsHeaders);
+    if (!auth.ok) return auth.response;
+
+    const storagePath = normalizeUserStoragePath(filePath, auth.user.id);
+    if (!storagePath.ok) {
+      return jsonResponse(
+        { error: storagePath.error },
+        storagePath.error.includes("ait değil") ? 403 : 400,
+        corsHeaders,
+      );
+    }
+
+    console.log(`[process] Starting for ${storagePath.path} recording=${recordingId} job=${jobId}`);
+
+    const supabase = createServiceClient();
+    const recordingOwner = await assertRecordingOwner(supabase, auth.user.id, corsHeaders, recordingId);
+    if (!recordingOwner.ok) return recordingOwner.response;
+    const jobOwner = await assertProcessingJobOwner(supabase, auth.user.id, corsHeaders, jobId);
+    if (!jobOwner.ok) return jobOwner.response;
 
     // ── Update job: transcribing ──
     if (jobId) {
@@ -229,7 +258,7 @@ serve(async (req) => {
     // ── Download audio from storage ──
     const { data: blob, error: dlErr } = await supabase.storage
       .from("recordings")
-      .download(filePath);
+      .download(storagePath.path);
 
     if (dlErr || !blob) {
       console.error("[process] Download error:", dlErr);
@@ -331,11 +360,11 @@ serve(async (req) => {
 
       if (jobId) await updateJobStatus(supabase, jobId, { pipeline_step: "transcribing", progress: 15 });
 
-      const mimeType = getAudioMimeType(filePath, isWav);
+      const mimeType = getAudioMimeType(storagePath.path, isWav);
       const providerResult = await transcribeWithSpeechProvider(
         audioBuf,
         mimeType,
-        filePath,
+        storagePath.path,
         `Donebird ${recordingType === "mülakat" ? "mülakat" : "toplantı"} ses kaydı. ${participants?.length ? `Katılımcılar: ${participants.join(", ")}.` : ""} Türkçe konuşmaları yazıya çevir.`,
       );
 
@@ -365,7 +394,7 @@ MUTLAK KURALLAR:
               role: "user",
               content: [
                 { type: "text", text: "Bu ses dosyasının tam Türkçe transkriptini üret." },
-                { type: "input_audio", input_audio: { data: base64, format: audioInputFormat(mimeType, filePath) } },
+                { type: "input_audio", input_audio: { data: base64, format: audioInputFormat(mimeType, storagePath.path) } },
               ],
             },
           ],
@@ -401,7 +430,7 @@ MUTLAK KURALLAR:
 
       // Save whatever we have
       if (transcript) {
-        await supabase.from("recordings").update({ transcript }).eq("id", recordingId);
+        await supabase.from("recordings").update({ transcript }).eq("id", recordingId).eq("user_id", auth.user.id);
       }
 
       return new Response(JSON.stringify({ error: reason }), {
@@ -423,7 +452,7 @@ MUTLAK KURALLAR:
     }
 
     // ── Save transcript ──
-    await supabase.from("recordings").update({ transcript }).eq("id", recordingId);
+    await supabase.from("recordings").update({ transcript }).eq("id", recordingId).eq("user_id", auth.user.id);
 
     if (jobId) await updateJobStatus(supabase, jobId, {
       status: "transcribed",

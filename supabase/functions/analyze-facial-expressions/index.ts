@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, handleAIError } from "../_shared/ai-client.ts";
 import { normalizeEmotionAnalysis } from "../_shared/emotion-normalizer.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 import { getPrompt } from "../_shared/prompt-registry.ts";
 import { logPromptUsage, renderPrompt } from "../_shared/prompt-renderer.ts";
 
@@ -57,7 +58,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { frames, participants } = await req.json();
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("analyze-facial-expressions", aiProviderChecks(), corsHeaders);
+    const { frames, participants } = body as { frames?: string[]; participants?: string[] };
 
     if (!frames || frames.length === 0) {
       return new Response(

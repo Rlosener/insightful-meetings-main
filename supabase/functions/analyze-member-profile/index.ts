@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, parseAIResponse } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +11,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { memberData, insights } = await req.json();
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("analyze-member-profile", aiProviderChecks(), corsHeaders);
+    const { memberData, insights } = body as { memberData: any; insights?: any[] };
 
     const insightsSummary = (insights || []).slice(0, 10).map((i: any) =>
       `${i.recordings?.title || "?"} | Katkı:${i.contribution_score || "?"} İlet:${i.communication_style || "?"} Güven:${i.confidence_level || "?"} | G:${(i.strengths || []).slice(0, 2).join(",")} Z:${(i.areas_for_improvement || []).slice(0, 2).join(",")}`

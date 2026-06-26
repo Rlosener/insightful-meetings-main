@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { useEffect, useState, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useState, useMemo, type ReactNode } from "react";
 import {
   ArrowLeft, Calendar, Clock, Users, CheckCircle2, AlertCircle, Target,
   TrendingUp, Loader2, User, Download, Brain, Smile, Frown, Meh, Eye,
@@ -23,6 +23,7 @@ import { format } from "date-fns";
 import { tr } from "date-fns/locale";
 import { toast } from "sonner";
 import { getMeetingSource } from "@/components/MeetingCard";
+import { getRecordingFileName } from "@/lib/storagePaths";
 
 const sourceDisplay = {
   zoom: { label: "Zoom", icon: Video, cls: "bg-[hsl(var(--info))]/10 text-[hsl(var(--info))]" },
@@ -457,15 +458,15 @@ const MeetingDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
 
-  const fetchRecording = () => {
+  const fetchRecording = useCallback(() => {
     if (!id) return;
     supabase.from("recordings").select("*").eq("id", id).single().then(({ data, error }) => {
       if (!error) setRecording(data);
       setLoading(false);
     });
-  };
+  }, [id]);
 
-  useEffect(() => { fetchRecording(); }, [id]);
+  useEffect(() => { fetchRecording(); }, [fetchRecording]);
 
   /* ── Actions ── */
 
@@ -476,7 +477,7 @@ const MeetingDetailPage = () => {
       `# ${recording.title}`,
       `Tarih: ${format(new Date(recording.date), "d MMMM yyyy HH:mm", { locale: tr })}`,
       recording.duration ? `Süre: ${recording.duration}` : "",
-      recording.video_url ? `Dosya: ${recording.video_url.split("/").pop()}` : "",
+      recording.video_url ? `Dosya: ${getRecordingFileName(recording.video_url) || recording.video_url}` : "",
       "",
       "## AI Özeti",
       a?.summary || "—",
@@ -568,7 +569,7 @@ const MeetingDetailPage = () => {
   const formattedDate = format(new Date(recording.date), "d MMMM yyyy, HH:mm", { locale: tr });
   const isInterview = recording.type === "mülakat";
   const participants = a?.participants_analysis || [];
-  const fileName = recording.video_url?.split("/").pop()?.replace(/^\d+_/, "") || null;
+  const fileName = getRecordingFileName(recording.video_url);
   const source = getMeetingSource(recording);
   const SourceIcon = sourceDisplay[source].icon;
 

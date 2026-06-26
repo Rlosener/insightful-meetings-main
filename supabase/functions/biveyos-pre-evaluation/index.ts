@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { callAI, handleAIError } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, readJsonBody } from "../_shared/health.ts";
 import { getPrompt } from "../_shared/prompt-registry.ts";
 import { logPromptUsage, renderPrompt } from "../_shared/prompt-renderer.ts";
 
@@ -14,7 +15,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { candidate } = await req.json();
+    const body = await readJsonBody(req);
+    if (isHealthRequest(body)) return healthResponse("biveyos-pre-evaluation", aiProviderChecks(), corsHeaders);
+    const { candidate } = body as { candidate?: Record<string, unknown> };
 
     if (!candidate || !text(candidate.jobTitle) || !text(candidate.cvText)) {
       return new Response(

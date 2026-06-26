@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   Loader2, Zap, CheckCircle2, ArrowLeft, ArrowRight, Target, TrendingUp,
@@ -73,9 +73,7 @@ const DailyTrainingPage = () => {
   const [previousScore, setPreviousScore] = useState<number | null>(null);
   const [currentTrainingId, setCurrentTrainingId] = useState<string | null>(null);
 
-  useEffect(() => { init(); }, []);
-
-  const init = async () => {
+  const init = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -105,9 +103,11 @@ const DailyTrainingPage = () => {
     if (lastCompleted) setPreviousScore(lastCompleted.score);
 
     setStep("goal-select");
-  };
+  }, []);
 
-  const loadHistory = async () => {
+  useEffect(() => { void init(); }, [init]);
+
+  const loadHistory = useCallback(async () => {
     setLoadingHistory(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -122,11 +122,11 @@ const DailyTrainingPage = () => {
 
     setPastSessions((data as PastSession[]) || []);
     setLoadingHistory(false);
-  };
+  }, []);
 
   useEffect(() => {
-    if (activeTab === "history") loadHistory();
-  }, [activeTab]);
+    if (activeTab === "history") void loadHistory();
+  }, [activeTab, loadHistory]);
 
   const selectGoal = (type: TrainingGoal["type"]) => {
     if (type === "career") {
@@ -139,12 +139,6 @@ const DailyTrainingPage = () => {
       setGoal({ type: "interview", company: companyInput.trim(), position: positionInput.trim() });
     }
   };
-
-  useEffect(() => {
-    if (goal && step === "goal-select") {
-      startTraining();
-    }
-  }, [goal]);
 
   const resetForNewTraining = () => {
     setGoal(null);
@@ -180,14 +174,7 @@ const DailyTrainingPage = () => {
     setStep("quiz");
   };
 
-  const startTraining = async () => {
-    setStep("loading");
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !profileData) return;
-    await generateTraining(user.id, profileData);
-  };
-
-  const generateTraining = async (userId: string, profile: any) => {
+  const generateTraining = useCallback(async (userId: string, profile: any) => {
     try {
       const [practicesRes, streakRes] = await Promise.all([
         supabase.from("practice_interviews").select("character_analysis, analysis_data")
@@ -251,7 +238,20 @@ const DailyTrainingPage = () => {
       else toast.error("Günlük eğitim oluşturulamadı");
       setStep("goal-select");
     }
-  };
+  }, [goal]);
+
+  const startTraining = useCallback(async () => {
+    setStep("loading");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !profileData) return;
+    await generateTraining(user.id, profileData);
+  }, [generateTraining, profileData]);
+
+  useEffect(() => {
+    if (goal && step === "goal-select") {
+      void startTraining();
+    }
+  }, [goal, startTraining, step]);
 
   const currentQuestion = questions[currentQ];
   const isMcq = currentQuestion?.type === "mcq";

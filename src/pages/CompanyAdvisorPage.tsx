@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { invokeEdgeFunction } from "@/lib/edgeFunctionClient";
+import { EDGE_FUNCTIONS } from "@/config/api";
 import ReactMarkdown from "react-markdown";
 
 /* ── Types ── */
@@ -142,7 +143,7 @@ const CompanyAdvisorPage = () => {
       answer: m.answer,
     }));
 
-    const { data, error } = await invokeEdgeFunction("company-advisor", {
+    const { data, error } = await invokeEdgeFunction(EDGE_FUNCTIONS.COMPANY_ADVISOR, {
       type: "chat",
       question: q.trim(),
       chatHistory: chatHistory.slice(0, -1),

@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Bot, User, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { SUPABASE_URL, SUPABASE_ANON_KEY, EDGE_FUNCTIONS } from "@/config/api";
+import { EDGE_FUNCTIONS } from "@/config/api";
+import { invokeEdgeFunctionStream } from "@/lib/edgeFunctionClient";
 
 type Message = { role: "user" | "assistant"; content: string };
 
@@ -16,8 +17,6 @@ interface MeetingAssistantChatProps {
   isRecording: boolean;
 }
 
-const CHAT_URL = `${SUPABASE_URL}/functions/v1/${EDGE_FUNCTIONS.MEETING_ASSISTANT}`;
-
 const MeetingAssistantChat = ({ transcript, meetingContext, isRecording }: MeetingAssistantChatProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -25,6 +24,11 @@ const MeetingAssistantChat = ({ transcript, meetingContext, isRecording }: Meeti
   const [autoSuggested, setAutoSuggested] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastTranscriptRef = useRef("");
+  const messagesRef = useRef<Message[]>([]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -33,29 +37,7 @@ const MeetingAssistantChat = ({ transcript, meetingContext, isRecording }: Meeti
     }
   }, [messages]);
 
-  // Auto-suggest when enough new transcript content arrives
-  useEffect(() => {
-    if (!isRecording || !transcript) return;
-    
-    const newContent = transcript.slice(lastTranscriptRef.current.length);
-    // Trigger auto-suggestion every ~100 chars of new content
-    if (newContent.length > 100 && !isLoading && !autoSuggested) {
-      lastTranscriptRef.current = transcript;
-      setAutoSuggested(true);
-      
-      const autoMsg: Message = {
-        role: "user",
-        content: `Şu ana kadarki toplantı transkripti:\n\n"${transcript.slice(-500)}"\n\nBu konuşma akışına göre anlık önerilerini ver. Eksik kalan noktalar, sorulabilecek sorular veya dikkat edilmesi gereken konular neler?`
-      };
-      
-      streamChat([...messages, autoMsg], autoMsg);
-      
-      // Reset auto suggest after 30 seconds
-      setTimeout(() => setAutoSuggested(false), 30000);
-    }
-  }, [transcript, isRecording]);
-
-  const streamChat = async (allMessages: Message[], newUserMsg: Message) => {
+  const streamChat = useCallback(async (allMessages: Message[], newUserMsg: Message) => {
     setMessages(prev => {
       const hasMsg = prev.find(m => m.content === newUserMsg.content && m.role === "user");
       return hasMsg ? prev : [...prev, newUserMsg];
@@ -65,23 +47,21 @@ const MeetingAssistantChat = ({ transcript, meetingContext, isRecording }: Meeti
     let assistantSoFar = "";
     
     try {
-      const resp = await fetch(CHAT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({
+      const { response: resp, error } = await invokeEdgeFunctionStream(
+        EDGE_FUNCTIONS.MEETING_ASSISTANT,
+        {
           messages: allMessages.map(m => ({ role: m.role, content: m.content })),
           meetingContext,
-        }),
-      });
+        },
+      );
 
-      if (!resp.ok || !resp.body) {
-        if (resp.status === 429) {
+      if (error || !resp?.body) {
+        if (error?.status === 429) {
           setMessages(prev => [...prev, { role: "assistant", content: "⚠️ İstek limiti aşıldı, lütfen biraz bekleyin." }]);
-        } else if (resp.status === 402) {
+        } else if (error?.status === 402) {
           setMessages(prev => [...prev, { role: "assistant", content: "⚠️ AI kredisi tükendi." }]);
+        } else {
+          setMessages(prev => [...prev, { role: "assistant", content: `⚠️ ${error?.message || "Bir hata oluştu, tekrar deneyin."}` }]);
         }
         setIsLoading(false);
         return;
@@ -134,7 +114,29 @@ const MeetingAssistantChat = ({ transcript, meetingContext, isRecording }: Meeti
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [meetingContext]);
+
+  // Auto-suggest when enough new transcript content arrives
+  useEffect(() => {
+    if (!isRecording || !transcript) return;
+
+    const newContent = transcript.slice(lastTranscriptRef.current.length);
+    // Trigger auto-suggestion every ~100 chars of new content
+    if (newContent.length > 100 && !isLoading && !autoSuggested) {
+      lastTranscriptRef.current = transcript;
+      setAutoSuggested(true);
+
+      const autoMsg: Message = {
+        role: "user",
+        content: `Şu ana kadarki toplantı transkripti:\n\n"${transcript.slice(-500)}"\n\nBu konuşma akışına göre anlık önerilerini ver. Eksik kalan noktalar, sorulabilecek sorular veya dikkat edilmesi gereken konular neler?`
+      };
+
+      void streamChat([...messagesRef.current, autoMsg], autoMsg);
+
+      // Reset auto suggest after 30 seconds
+      setTimeout(() => setAutoSuggested(false), 30000);
+    }
+  }, [autoSuggested, isLoading, isRecording, streamChat, transcript]);
 
   const handleSend = () => {
     if (!input.trim() || isLoading) return;

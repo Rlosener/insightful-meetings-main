@@ -89,10 +89,15 @@ const getUserId = async () => {
   return data.user.id;
 };
 
-export const listCandidates = async (): Promise<BiveyosCandidateRecord[]> => {
+export const listCandidates = async (): Promise<{
+  candidates: BiveyosCandidateRecord[];
+  source: CandidatePersistenceSource;
+}> => {
   const localCandidates = readLocalCandidates();
   const userId = await getUserId();
-  if (!userId) return localCandidates;
+  if (!userId) {
+    return { candidates: localCandidates, source: "local" };
+  }
 
   const { data, error } = await supabase
     .from("candidates")
@@ -102,12 +107,12 @@ export const listCandidates = async (): Promise<BiveyosCandidateRecord[]> => {
 
   if (error || !data) {
     console.warn("[biveyos] candidates table unavailable, using local fallback", error?.message);
-    return localCandidates;
+    return { candidates: localCandidates, source: "local" };
   }
 
   const candidates = data.map(fromRow);
   writeLocalCandidates(candidates);
-  return candidates;
+  return { candidates, source: "supabase" };
 };
 
 export const saveCandidateRecord = async (candidate: BiveyosCandidateRecord): Promise<CandidatePersistenceResult> => {

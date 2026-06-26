@@ -1,58 +1,64 @@
 project_id = "zmaqqipujjwzviuthjzg"
 
 [functions.analyze-interview]
-verify_jwt = false
+verify_jwt = true
 
 [functions.meeting-assistant]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-facial-expressions]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-member-profile]
-verify_jwt = false
+verify_jwt = true
 
 [functions.save-member-insights]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-company]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-practice-interview]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-character-overall]
-verify_jwt = false
+verify_jwt = true
 
 [functions.zoom-import]
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-practice-questions]
-verify_jwt = false
+verify_jwt = true
 
 [functions.ai-career-coach]
-verify_jwt = false
+verify_jwt = true
 
 [functions.career-coach-chat]
-verify_jwt = false
+verify_jwt = true
 
 [functions.career-coach-insights]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-career-profile]
-verify_jwt = false
+verify_jwt = true
 
 [functions.parse-linkedin]
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-daily-training]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-micro-test]
-verify_jwt = false
+verify_jwt = true
 
 [functions.transcribe-recording]
-verify_jwt = false
+verify_jwt = true
 
 [functions.process-recording]
-verify_jwt = false
+verify_jwt = true
+
+[functions.company-advisor]
+verify_jwt = true
+
+[functions.biveyos-pre-evaluation]
+verify_jwt = true

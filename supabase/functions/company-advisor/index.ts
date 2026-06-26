@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { callAI, parseAIResponse } from "../_shared/ai-client.ts";
+import { aiProviderChecks, healthResponse, isHealthRequest, supabaseChecks } from "../_shared/health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -598,6 +599,26 @@ serve(async (req) => {
   }
 
   try {
+    const rawBody = await req.text();
+    console.log("[company-advisor] raw request body:", rawBody);
+
+    let body: any = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch (_error) {
+      return new Response(JSON.stringify({ error: "Request body geçerli JSON değil." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (isHealthRequest(body)) {
+      return healthResponse("company-advisor", {
+        ...supabaseChecks({ anon: true }),
+        ...aiProviderChecks(),
+      }, corsHeaders);
+    }
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Yetkilendirme gerekli" }), {
@@ -620,19 +641,6 @@ serve(async (req) => {
     if (authError || !user) {
       return new Response(JSON.stringify({ error: "Oturum geçersiz" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const rawBody = await req.text();
-    console.log("[company-advisor] raw request body:", rawBody);
-
-    let body: any = {};
-    try {
-      body = rawBody ? JSON.parse(rawBody) : {};
-    } catch (_error) {
-      return new Response(JSON.stringify({ error: "Request body geçerli JSON değil." }), {
-        status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
